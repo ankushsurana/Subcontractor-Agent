@@ -18,91 +18,125 @@ class ResearchOrchestrator:
         self.project_history = ProjectHistoryParser()
 
     async def execute_research(self, request: dict) -> List[ResearchResult]:
-        """
-        Main orchestration method to perform subcontractor research.
-        """
+        print(f"[Orchestrator] Input request: {request}")
         try:
-            logger.info(f"Starting research for {request.get('trade')} in {request.get('city')}, {request.get('state')}")
+            logger.info(f"[Orchestrator] Starting research for {request.get('trade')} in {request.get('city')}, {request.get('state')}")
             
-            # Phase 1: Discovery
+            # Phase 1: Discovery (FR1)
             try:
+                logger.info("[FR1] Starting discovery phase...")
                 candidates = await self.discovery.find_subcontractors(
                     request.get("trade", ""),
                     request.get("city", ""), 
                     request.get("state", ""),
                     request.get("keywords", [])
                 )
+                logger.info(f"[FR1] Discovery phase found {len(candidates)} candidates")
                 
-                logger.info(f"Discovery phase found {len(candidates)} candidates")
+                # Log the first 3 candidates for debugging
+                for i, candidate in enumerate(candidates[:3]):
+                    logger.info(f"[FR1] Candidate {i+1}: {candidate.get('url')} - {candidate.get('title')}")
                 
                 if not candidates:
-                    logger.warning("No candidates found during discovery phase")
+                    logger.warning("[FR1] No candidates found during discovery phase")
                     return []
             except Exception as e:
-                logger.error(f"Error in discovery phase: {str(e)}")
+                logger.error(f"[FR1] Error in discovery phase: {str(e)}")
                 logger.error(traceback.format_exc())
                 return []
             
-            # Phase 2: Profile Extraction (FR3)
+            # Phase 2: Profile Extraction (FR2)
             try:
+                logger.info("[FR2] Starting profile extraction phase...")
                 urls = [c.get("url", "") for c in candidates if c.get("url")]
-                logger.info(f"Extracted {len(urls)} URLs from candidates")
+                logger.info(f"[FR2] Extracting profiles from {len(urls)} URLs")
                 
                 if not urls:
-                    logger.warning("No valid URLs found in candidates")
+                    logger.warning("[FR2] No valid URLs found in candidates")
                     return []
                     
                 raw_profiles = await self.extractor.extract_profiles(urls)
-                logger.info(f"Profile extraction found {len(raw_profiles)} profiles")
+                logger.info(f"[FR2] Profile extraction found {len(raw_profiles)} profiles")
+                
+                # Log sample profile data
+                if raw_profiles:
+                    sample = raw_profiles[0]
+                    logger.info(f"[FR2] Sample profile - Name: {sample.get('business_name')}, Website: {sample.get('website')}")
                 
                 if not raw_profiles:
-                    logger.warning("No profiles extracted")
+                    logger.warning("[FR2] No profiles extracted")
                     return []
             except Exception as e:
-                logger.error(f"Error in profile extraction phase: {str(e)}")
+                logger.error(f"[FR2] Error in profile extraction phase: {str(e)}")
                 logger.error(traceback.format_exc())
                 return []
 
-            # Phase 3: Project History Parsing (FR4)
+            # Phase 3: License Verification (FR3)
             try:
-                logger.info(f"Starting project history parsing for {len(raw_profiles)} profiles")
-                enriched_profiles = await self.project_history.enrich_profiles(raw_profiles)
-                logger.info(f"Project history parsing enriched {len(enriched_profiles)} profiles")
+                logger.info("[FR3] Starting license verification phase...")
+                verified_profiles = await self.verifier.verify_batch(raw_profiles)
+                logger.info(f"[FR3] License verification processed {len(verified_profiles)} profiles")
                 
-                if not enriched_profiles:
-                    logger.warning("No profiles after enrichment, using raw profiles")
-                    enriched_profiles = raw_profiles
-            except Exception as e:
-                logger.error(f"Error in project history phase: {str(e)}")
-                logger.error(traceback.format_exc())
-                # Continue with raw profiles if history parsing fails
-                enriched_profiles = raw_profiles
-
-            # Phase 4: License Verification (FR2)
-            try:
-                verified_profiles = await self.verifier.verify_batch(enriched_profiles)
-                logger.info(f"License verification processed {len(verified_profiles)} profiles")
+                # Log license verification results for the first few profiles
+                for i, profile in enumerate(verified_profiles[:3]):
+                    logger.info(f"[FR3] Profile {i+1} - Business: {profile.get('business_name')}, "
+                              f"License: {profile.get('lic_number', 'Unknown')}, "
+                              f"Active: {profile.get('lic_active', False)}")
                 
                 if not verified_profiles:
-                    logger.warning("No profiles after verification")
-                    # Still continue with formatting
+                    logger.warning("[FR3] No profiles after verification, using raw profiles")
+                    verified_profiles = raw_profiles
             except Exception as e:
-                logger.error(f"Error in license verification phase: {str(e)}")
+                logger.error(f"[FR3] Error in license verification phase: {str(e)}")
                 logger.error(traceback.format_exc())
                 # Continue with unverified profiles
-                verified_profiles = enriched_profiles
-            
-            # Phase 5: Result Formatting
+                logger.info("[FR3] Continuing with unverified profiles")
+                verified_profiles = raw_profiles
+
+            # Phase 4: Project History Parsing (FR4)
             try:
-                results = self._format_results(verified_profiles, request)
-                logger.info(f"Formatted {len(results)} final results")
+                logger.info("[FR4] Starting project history parsing phase...")
+                enriched_profiles = await self.project_history.enrich_profiles(verified_profiles)
+                logger.info(f"[FR4] Project history parsing enriched {len(enriched_profiles)} profiles")
+                
+                # Log project counts for first few profiles
+                for i, profile in enumerate(enriched_profiles[:3]):
+                    tx_projects = profile.get('tx_projects_past_5yrs', 0) or 0
+                    logger.info(f"[FR4] Profile {i+1} - Business: {profile.get('business_name')}, "
+                              f"TX Projects: {tx_projects}")
+                
+                if not enriched_profiles:
+                    logger.warning("[FR4] No profiles after enrichment, using verified profiles")
+                    enriched_profiles = verified_profiles
             except Exception as e:
-                logger.error(f"Error in result formatting: {str(e)}")
+                logger.error(f"[FR4] Error in project history phase: {str(e)}")
+                logger.error(traceback.format_exc())
+                # Continue with verified profiles if history parsing fails
+                logger.info("[FR4] Continuing with verified profiles")
+                enriched_profiles = verified_profiles
+
+            # Phase 5: Result Formatting and Scoring (FR5)
+            try:
+                logger.info("[FR5] Starting result formatting and scoring phase...")
+                results = self._format_results(enriched_profiles, request)
+                logger.info(f"[FR5] Formatted and scored {len(results)} final results")
+                
+                # Log final scores for top 3 results
+                sorted_results = sorted(results, key=lambda x: x.score, reverse=True)
+                for i, result in enumerate(sorted_results[:3]):
+                    logger.info(f"[FR5] Result {i+1} - Name: {result.name}, Score: {result.score}, "
+                              f"License: {result.lic_number}, Active: {result.lic_active}")
+                
+                if not results:
+                    logger.warning("[FR5] No results after formatting")
+                    return []
+            except Exception as e:
+                logger.error(f"[FR5] Error in result formatting: {str(e)}")
                 logger.error(traceback.format_exc())
                 return []
             
-            logger.info(f"Research complete: Found {len(results)} qualified subcontractors")
-            return results
+            logger.info(f"[Orchestrator] Research complete: Found {len(results)} qualified subcontractors")
+            return sorted(results, key=lambda x: x.score, reverse=True)
             
         except Exception as e:
             logger.error(f"Research orchestration failed: {str(e)}")
@@ -112,53 +146,95 @@ class ResearchOrchestrator:
     def _format_results(self, profiles: List[Dict], request: dict) -> List[ResearchResult]:
         """
         Format raw profiles into the expected ResearchResult schema.
+        Maps data from the extractor and enrichers to the final output format.
         """
         results = []
+        if not profiles:
+            logger.warning("No profiles to format")
+            return results
+        
+        logger.info(f"Formatting {len(profiles)} profiles into research results")
+        
         for profile in profiles:
             try:
-                # Skip profiles with insufficient data
-                if not profile.get("name") and not profile.get("website") and not profile.get("source_url"):
-                    logger.debug(f"Skipping profile with insufficient data: {profile}")
+                # Add debug logging to see the raw profile
+                logger.debug(f"Raw profile data: {profile}")
+                
+                # Accept profiles with at least a website
+                if not profile.get("website"):
+                    logger.debug(f"Skipping profile with no website: {profile}")
                     continue
                     
                 # Ensure all values have appropriate defaults and types
-                name = str(profile.get("name", "Unknown"))
+                # Check for business_name first, fall back to name
+                name = str(profile.get("business_name") or profile.get("name", "Unknown"))
                 website = str(profile.get("website") or profile.get("source_url", ""))
-                city = str(request.get("city", ""))
-                state = str(request.get("state", ""))
+                
+                # Extract location data (prefer profile data, fallback to request data)
+                location = profile.get("hq_address") or ""
+                city = str(profile.get("city") or request.get("city", ""))
+                state = str(profile.get("state") or request.get("state", ""))
+                
+                # If we have a full address but no city/state, try to extract them
+                if location and (not city or not state):
+                    # Simple extraction - assumes US address format with city, state at the end
+                    parts = location.split(",")
+                    if len(parts) >= 2:
+                        if not city and len(parts) >= 2:
+                            city = parts[-2].strip()
+                        if not state and len(parts) >= 1:
+                            state_zip = parts[-1].strip().split()
+                            if state_zip:
+                                state = state_zip[0].strip()
+                
+                # License data
                 lic_active = bool(profile.get("lic_active", False))
-                lic_number = str(profile.get("license") or profile.get("lic_number", "Unknown"))
+                lic_number = str(profile.get("lic_number") or profile.get("license") or 
+                               profile.get("licensing_text") or "Unknown")
                 
                 # Convert nullable numeric values
                 bond_amount = self._parse_bond_amount(profile, request.get("min_bond", 0))
+                
                 tx_projects = profile.get("tx_projects_past_5yrs", 0)
-                if not isinstance(tx_projects, int):
+                if not isinstance(tx_projects, int) or tx_projects is None:
                     tx_projects = 0
+                
+                # Score calculation using all available data
                 score = self._calculate_score(profile, request)
+                if score is None:
+                    score = 0
                 
                 # Handle text values safely
                 evidence_url = str(profile.get("website") or profile.get("source_url", ""))
-                raw_text = profile.get("raw_text") or profile.get("evidence_text", "")
-                evidence_text = str(raw_text)[:500] if raw_text else ""
                 
-                result = ResearchResult(
-                    name=name,
-                    website=website,
-                    city=city,
-                    state=state,
-                    lic_active=lic_active,
-                    lic_number=lic_number,
-                    bond_amount=bond_amount,
-                    tx_projects_past_5yrs=tx_projects,
-                    score=score,
-                    evidence_url=evidence_url,
-                    evidence_text=evidence_text,
-                    last_checked=datetime.utcnow().isoformat()
-                )
+                # Combine all available text evidence
+                evidence_text = self._get_evidence_text(profile)
+                
+                # Ensure all values are proper types for Pydantic
+                result_data = {
+                    "name": name or "Unknown",
+                    "website": website or "",
+                    "city": city or "",
+                    "state": state or "",
+                    "lic_active": bool(lic_active),
+                    "lic_number": lic_number or "Unknown",
+                    "bond_amount": int(bond_amount) if bond_amount is not None else 0,
+                    "tx_projects_past_5yrs": int(tx_projects) if tx_projects is not None else 0,
+                    "score": int(score) if score is not None else 0,
+                    "evidence_url": evidence_url or "",
+                    "evidence_text": evidence_text or "",
+                    "last_checked": datetime.utcnow().isoformat()
+                }
+                
+                # Log the data before creating the model for debugging
+                logger.debug(f"Creating ResearchResult with data: {result_data}")
+                
+                result = ResearchResult(**result_data)
                 results.append(result)
             except Exception as e:
-                logger.error(f"Error formatting result: {str(e)}")
+                logger.error(f"Error formatting result: {str(e)} with profile: {profile}")
                 
+        logger.info(f"Successfully formatted {len(results)} results")
         return results
 
     def _count_tx_projects(self, profile: Dict) -> int:
@@ -189,48 +265,138 @@ class ResearchOrchestrator:
         return " [...] ".join(evidence)[:500]  # Concatenate with length limit
 
     def _calculate_score(self, profile: Dict, request: Dict) -> int:
-        """Enhanced scoring with project history weighting"""
-        score = 0
+        """
+        Enhanced scoring algorithm for ranking subcontractors.
         
-        # Geographic match (30 points max)
-        if profile.get("state") == request["state"]:
-            score += 20
-            if profile.get("city") == request["city"]:
-                score += 10
-                
-        # License status (20 points)
-        if profile.get("lic_active"):
-            score += 20
+        Weights multiple factors:
+        - Geographic match (30 points max)
+        - License status (20 points)
+        - Bonding capacity (30 points)
+        - Project history (20 points)
+        - Keyword relevance (bonus points)
+        
+        Returns an integer score from 0-100.
+        """
+        try:
+            score = 0
+            logger.debug(f"[Scoring] Calculating score for {profile.get('business_name', 'Unknown')}")
             
-        # Bonding capacity (30 points)
-        bond_amount = profile.get("bond_amount", 0)
-        min_bond = request.get("min_bond", 0)
-        
-        if bond_amount >= min_bond:
-            score += 30
-        elif bond_amount >= min_bond * 0.5:
-            score += 15
+            # Try to get state from request safely
+            request_state = request.get("state", "")
+            request_city = request.get("city", "")
             
-        # Project history (20 points) - now using verified TX projects
-        tx_projects = self._count_tx_projects(profile)
-        score += min(20, tx_projects * 5)  # 4 projects = max 20 points
-        
-        # Keyword matching (additional points)
-        text = f"{profile.get('name', '')} {profile.get('evidence_text', '')}".lower()
-        for keyword in request.get("keywords", []):
-            if keyword.lower() in text:
-                score += 5
+            # 1. Geographic match (30 points max)
+            location_score = 0
+            profile_state = profile.get("state", "")
+            
+            # State match (20 points)
+            if profile_state and request_state and profile_state.upper() == request_state.upper():
+                location_score += 20
+                logger.debug(f"[Scoring] State match +20 points")
                 
-        return min(100, score)  # Cap at 100
+                # City match (additional 10 points)
+                profile_city = profile.get("city", "")
+                if profile_city and request_city and profile_city.lower() == request_city.lower():
+                    location_score += 10
+                    logger.debug(f"[Scoring] City match +10 points")
+            
+            score += location_score
+            
+            # 2. License status (20 points)
+            license_score = 0
+            lic_active = profile.get("lic_active", False)
+            if lic_active:
+                license_score = 20
+                logger.debug(f"[Scoring] Active license +20 points")
+            elif profile.get("lic_number") and profile.get("lic_number") != "Unknown":
+                # Partial points for having a license even if not active
+                license_score = 10
+                logger.debug(f"[Scoring] Has license number but not active +10 points")
+                
+            score += license_score
+                
+            # 3. Bonding capacity (30 points)
+            bond_score = 0
+            bond_amount = profile.get("bond_amount", 0) or 0  # Convert None to 0
+            min_bond = request.get("min_bond", 0) or 0  # Convert None to 0
+            
+            # Make sure values are numbers
+            if isinstance(bond_amount, str) and bond_amount.isdigit():
+                bond_amount = int(bond_amount)
+            if isinstance(min_bond, str) and min_bond.isdigit():
+                min_bond = int(min_bond)
+                
+            if bond_amount and min_bond:
+                if bond_amount >= min_bond:
+                    bond_score = 30
+                    logger.debug(f"[Scoring] Bond meets/exceeds requirement +30 points")
+                elif bond_amount >= (min_bond * 0.5):
+                    bond_score = 15
+                    logger.debug(f"[Scoring] Bond at least 50% of requirement +15 points")
+                elif bond_amount > 0:
+                    # Some points just for having bond info
+                    bond_score = 5
+                    logger.debug(f"[Scoring] Has some bond amount +5 points")
+                
+            score += bond_score
+                
+            # 4. Project history (20 points) - using verified TX projects
+            project_score = 0
+            tx_projects = self._count_tx_projects(profile)
+            
+            if tx_projects >= 4:
+                project_score = 20
+                logger.debug(f"[Scoring] 4+ TX projects +20 points")
+            else:
+                project_score = min(20, tx_projects * 5)  # 5 points per project up to 20
+                logger.debug(f"[Scoring] {tx_projects} TX projects +{project_score} points")
+                
+            score += project_score
+            
+            # 5. Keyword matching (bonus points, up to 10)
+            keyword_score = 0
+            profile_name = profile.get("business_name", "") or profile.get("name", "") or ""
+            evidence_text = profile.get("evidence_text", "") or ""
+            text = f"{profile_name} {evidence_text}".lower()
+            
+            for keyword in request.get("keywords", []):
+                if keyword and keyword.lower() in text:
+                    keyword_score += 2
+                    logger.debug(f"[Scoring] Keyword match '{keyword}' +2 points")
+                    
+            # Cap keyword bonus at 10 points
+            keyword_score = min(10, keyword_score)
+            score += keyword_score
+                    
+            # Cap total score at 100
+            final_score = min(100, score)
+            logger.debug(f"[Scoring] Final score: {final_score} (Location: {location_score}, License: {license_score}, "
+                      f"Bond: {bond_score}, Projects: {project_score}, Keywords: {keyword_score})")
+                    
+            return final_score
+            
+        except Exception as e:
+            logger.error(f"[Scoring] Error in _calculate_score: {str(e)}", exc_info=True)
+            return 0  # Default score on error
 
     def _parse_bond_amount(self, profile: Dict, min_bond: int) -> int:
         """Parse bonding capacity with evidence validation"""
-        # Prefer explicitly parsed amounts
-        if isinstance(profile.get("bond_amount"), (int, float)):
-            return int(profile["bond_amount"])
+        try:
+            # Ensure min_bond is an integer, defaulting to 0
+            min_bond = int(min_bond) if min_bond is not None else 0
             
-        # Fallback to minimum if bonding mentioned but no amount found
-        if "bond" in profile.get("evidence_text", "").lower():
-            return int(min_bond)
+            # Prefer explicitly parsed amounts
+            if profile and "bond_amount" in profile:
+                bond_amount = profile["bond_amount"]
+                if isinstance(bond_amount, (int, float)) and bond_amount is not None:
+                    return int(bond_amount)
             
-        return 0  # Default for no bonding info
+            # Fallback to minimum if bonding mentioned but no amount found
+            evidence_text = profile.get("evidence_text", "") or ""
+            if evidence_text and "bond" in evidence_text.lower():
+                return min_bond
+            
+            return 0  # Default for no bonding info
+        except Exception as e:
+            logger.error(f"Error in _parse_bond_amount: {str(e)} with profile: {profile}")
+            return 0  # Default on error

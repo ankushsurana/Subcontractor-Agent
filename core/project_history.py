@@ -32,7 +32,6 @@ class ProjectHistoryParser:
                 tasks = [self._enrich_profile(client, profile) for profile in profiles]
                 enriched_profiles = await asyncio.gather(*tasks, return_exceptions=True)
                 
-                # Process results, keeping original profiles if exceptions occurred
                 result = []
                 for i, profile_or_exception in enumerate(enriched_profiles):
                     if isinstance(profile_or_exception, Exception):
@@ -48,86 +47,138 @@ class ProjectHistoryParser:
                 return result
         except Exception as e:
             logger.error(f"Error in project history enrichment: {str(e)}")
-            # If all else fails, return original profiles
+
             for profile in profiles:
                 profile["tx_projects_past_5yrs"] = 0
             return profiles
 
     async def _enrich_profile(self, client: httpx.AsyncClient, profile: Dict[str, Any]) -> Dict[str, Any]:
-        """Enrich a single profile with project history data"""
+        """
+        Enrich a single profile with project history data.
+        Extracts project information and analyzes Texas-specific projects.
+        """
         # Ensure profile is not None and is a dict
         if not profile or not isinstance(profile, dict):
-            logger.warning("Invalid profile passed to project history parser")
+            logger.warning("[Projects] Invalid profile passed to project history parser")
             return {"tx_projects_past_5yrs": 0}
             
         # Get URL from profile, with fallbacks
         url = profile.get("website") or profile.get("source_url")
         if not url:
+            logger.warning("[Projects] Profile has no website URL for project extraction")
             profile["tx_projects_past_5yrs"] = 0
             return profile
             
         try:
             # Add debug logging
-            logger.info(f"Processing project history for URL: {url}")
+            logger.info(f"[Projects] Processing project history for URL: {url}")
             
-            resp = await client.get(url)
+            # Get main site content
+            resp = await client.get(url, follow_redirects=True)
             soup = BeautifulSoup(resp.text, "lxml")
+            
+            # Look for project-related links
             links = [a.get("href") for a in soup.find_all("a", href=True)]
             
-            # Filter links for project/news/case-study keywords
-            project_links = [l for l in links if l and isinstance(l, str) and any(k in l.lower() for k in self.keywords)]
+            project_links = []
+            for link in links:
+                if not link or not isinstance(link, str):
+                    continue
+                    
+                # Check if link contains project-related keywords
+                if any(k in link.lower() for k in self.keywords):
+                    # Convert relative links to absolute
+                    from urllib.parse import urljoin
+                    abs_link = urljoin(url, link)
+                    project_links.append(abs_link)
             
-            # Make absolute URLs
-            from urllib.parse import urljoin
-            project_links = [urljoin(url, l) for l in project_links]
+            # Remove duplicates and limit to 5 project links
+            project_links = list(set(project_links))[:5]
+            logger.info(f"[Projects] Found {len(project_links)} potential project links")
             
-            # Debug links found
-            logger.info(f"Found {len(project_links)} potential project links")
-            
-            # Limit to 5 project pages per profile
-            project_links = project_links[:5]
-            
-            # Scrape and parse each project page
+            # Initialize counters and evidence
             tx_recent_count = 0
+            tx_older_count = 0
             project_evidence = []
             
-            for plink in project_links:
+            # Process each project link
+            for link in project_links:
                 try:
-                    presp = await client.get(plink)
-                    if presp.status_code != 200:
+                    logger.info(f"[Projects] Analyzing project page: {link}")
+                    
+                    # Get project page content
+                    resp = await client.get(link, follow_redirects=True, timeout=10.0)
+                    if resp.status_code != 200:
                         continue
                         
-                    ptext = presp.text
-                    # Find all years
-                    years = [int(y) for y in self.year_pattern.findall(ptext)]
-                    # Find all states
-                    states = self.state_pattern.findall(ptext)
-                    # Find project types
-                    types = self.project_type_pattern.findall(ptext)
+                    project_soup = BeautifulSoup(resp.text, "lxml")
+                    project_text = project_soup.get_text(" ", strip=True)
                     
-                    # Count if Texas and year in last 5 years
-                    for y in years:
-                        if self.current_year - y <= 5 and states:
+                    # Check for Texas references
+                    is_tx_project = any(
+                        term in project_text.lower() 
+                        for term in ["texas", " tx ", "tx,", "dallas", "houston", "austin", "san antonio"]
+                    )
+                    
+                    # Check for recent dates (last 5 years)
+                    has_recent_date = False
+                    current_year = datetime.now().year
+                    past_5yrs = [str(yr) for yr in range(current_year-5, current_year+1)]
+                    
+                    # Look for year mentions (e.g., "2023", "Completed in 2022")
+                    for year in past_5yrs:
+                        if year in project_text:
+                            has_recent_date = True
+                            break
+                            
+                    # Track project counts
+                    if is_tx_project:
+                        if has_recent_date:
                             tx_recent_count += 1
-                            # Add evidence
-                            evidence = {
-                                "url": plink,
-                                "year": y,
-                                "type": types[0] if types else "unknown"
-                            }
-                            project_evidence.append(evidence)
+                            
+                            # Save evidence snippet for reference
+                            project_evidence.append({
+                                "url": link,
+                                "text": project_text[:300],
+                                "recent": True,
+                                "texas": True
+                            })
+                        else:
+                            tx_older_count += 1
+                            
+                    logger.info(f"[Projects] Link analysis: TX={is_tx_project}, Recent={has_recent_date}")
+                        
                 except Exception as e:
-                    logger.warning(f"Error scraping project page {plink}: {e}")
+                    logger.warning(f"[Projects] Error processing project link {link}: {str(e)}")
+                    continue
             
-            # Add data to profile
+            # Also check main page for project mentions
+            main_text = soup.get_text(" ", strip=True).lower()
+            for texas_term in ["texas", " tx ", "tx,", "dallas", "houston", "austin", "san antonio"]:
+                if texas_term in main_text:
+                    for year in past_5yrs:
+                        if year in main_text:
+                            text_snippet = main_text[max(0, main_text.find(texas_term)-50):main_text.find(texas_term)+150]
+                            project_evidence.append({
+                                "url": url,
+                                "text": text_snippet,
+                                "recent": True,
+                                "texas": True
+                            })
+                            tx_recent_count += 1
+                            break
+                    break
+            
+            # Update profile with project history data
             profile["tx_projects_past_5yrs"] = tx_recent_count
-            if project_evidence:
-                profile["project_evidence"] = project_evidence[:3]  # Store top 3 project evidences
+            profile["tx_older_projects"] = tx_older_count
+            profile["project_evidence"] = project_evidence
             
-            logger.info(f"Found {tx_recent_count} Texas projects in past 5 years")
+            logger.info(f"[Projects] Final counts - Recent TX projects: {tx_recent_count}, Older TX projects: {tx_older_count}")
+            
             return profile
-            
         except Exception as e:
-            logger.warning(f"Error scraping main page {url}: {e}")
+            logger.error(f"[Projects] Error in project history enrichment: {str(e)}")
+            # Return original profile with zero projects on error
             profile["tx_projects_past_5yrs"] = 0
             return profile
