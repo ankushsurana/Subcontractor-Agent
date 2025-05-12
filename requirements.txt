@@ -1,0 +1,14 @@
+fastapi
+uvicorn
+celery[redis]
+redis
+sqlalchemy
+pydantic
+pydantic-settings
+httpx
+beautifulsoup4
+duckduckgo-search
+lxml
+python-dotenv
+motor
+transformers
