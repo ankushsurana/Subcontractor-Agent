@@ -45,3 +45,23 @@ async def global_exception_handler(request: Request, exc: Exception):
 
 # Include API routes
 app.include_router(router, prefix="/api/v1")
+
+
+DATASET_URL = "https://drive.google.com/file/d/1ZD3yt4FMyWxqoCqwd5nIrHvBVkwVNSc9/view?usp=drive_link"
+DATASET_PATH = "dataset/TDLR_All_Licenses.csv"
+
+@app.on_event("startup")
+async def download_dataset_on_startup():
+    if not os.path.exists(DATASET_PATH):
+        os.makedirs(os.path.dirname(DATASET_PATH), exist_ok=True)
+        logging.info("Downloading dataset...")
+        try:
+            response = requests.get(DATASET_URL, timeout=60)
+            response.raise_for_status()
+            with open(DATASET_PATH, "wb") as f:
+                f.write(response.content)
+            logging.info("Dataset downloaded successfully.")
+        except Exception as e:
+            logging.error(f"Failed to download dataset: {e}")
+    else:
+        logging.info("Dataset already exists. Skipping download.")
