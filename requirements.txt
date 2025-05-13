@@ -13,5 +13,7 @@ python-dotenv>=1.0.0
 motor>=3.1.2
 transformers
 tenacity>=8.2.2
+tf-keras
 pandas
 rapidfuzz
+tensorflow-cpu

@@ -45,7 +45,3 @@ async def global_exception_handler(request: Request, exc: Exception):
 
 # Include API routes
 app.include_router(router, prefix="/api/v1")
-
-@app.get("/health")
-def health_check():
-    return {"status": "healthy", "version": "1.0.0"}

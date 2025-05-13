@@ -80,7 +80,6 @@ class SubcontractorExtractor:
             business_name = self._extract_business_name(soup, url)
             logger.info(f"[Extractor] Extracted business name: {business_name}")
             
-            # Extract all profile data
             profile = {
                 "business_name": business_name,
                 "website": url,
@@ -95,20 +94,16 @@ class SubcontractorExtractor:
                 "last_checked": datetime.utcnow().isoformat()
             }
             
-            # Add debug log of key data points
             logger.debug(f"[Extractor] Extracted profile: {profile}")
             
-            # Add city and state from address if available
             if profile["hq_address"]:
                 address_parts = profile["hq_address"].split(",")
                 if len(address_parts) >= 2:
-                    # Assume format: street, city, state zip
                     if len(address_parts) >= 3:
                         profile["city"] = address_parts[-2].strip()
                         state_zip = address_parts[-1].strip().split()
                         if state_zip:
                             profile["state"] = state_zip[0].strip()
-                    # Assume format: city, state zip
                     else:
                         profile["city"] = address_parts[0].strip()
                         state_zip = address_parts[1].strip().split()
@@ -123,7 +118,6 @@ class SubcontractorExtractor:
 
     def _extract_business_name(self, soup: BeautifulSoup, url: str) -> str:
         """Extract business name with multiple fallback strategies"""
-        # First try common metadata selectors
         for selector in [
             'meta[property="og:site_name"]',
             'meta[name="application-name"]',
@@ -133,10 +127,9 @@ class SubcontractorExtractor:
             element = soup.select_one(selector)
             if element:
                 if selector == 'title' and element.string:
-                    # Clean up title (remove common suffixes like "Home", "Official Site", etc.)
                     name = element.string.strip()
-                    name = re.sub(r'\s*[|]\s*.+$', '', name)  # Remove everything after pipe
-                    name = re.sub(r'\s*[-]\s*.+$', '', name)  # Remove everything after dash
+                    name = re.sub(r'\s*[|]\s*.+$', '', name)  
+                    name = re.sub(r'\s*[-]\s*.+$', '', name)
                     name = re.sub(r'(Home|Official Site|Homepage|Welcome)$', '', name, flags=re.IGNORECASE)
                     return name.strip()
                 elif selector.startswith('meta') and element.get('content'):
@@ -144,31 +137,24 @@ class SubcontractorExtractor:
                 elif element.string:
                     return element.string.strip()
         
-        # Try common header elements with "logo" or "brand" in class/id
         for logo_sel in ['.logo', '.brand', '#logo', '#brand', '.navbar-brand']:
             logo = soup.select_one(logo_sel)
             if logo:
-                # Check if it has text
                 if logo.string and logo.string.strip():
                     return logo.string.strip()
-                # Check for alt text in nested image
                 img = logo.find('img')
                 if img and img.get('alt') and img.get('alt').strip():
                     return img.get('alt').strip()
         
-        # Fallback to domain name if nothing found
         try:
             domain = urlparse(url).netloc
-            # Remove www. and .com/.org etc for cleaner name
             domain_name = re.sub(r'^www\.', '', domain)
             domain_name = re.sub(r'\.(com|org|net|io|co|us|gov)$', '', domain_name)
-            # Convert domain-name or domain_name to "Domain Name"
             domain_name = re.sub(r'[-_]', ' ', domain_name)
-            # Handle subdomains by taking only the main domain part
             if '.' in domain_name:
                 parts = domain_name.split('.')
                 if len(parts) > 1:
-                    domain_name = parts[-2]  # Take the second last part as the name
+                    domain_name = parts[-2] 
             return domain_name.title()
         except Exception as e:
             logger.error(f"Error extracting business name from URL {url}: {str(e)}")
@@ -223,21 +209,19 @@ class SubcontractorExtractor:
         """Extract project snippets with keyword density analysis"""
         sentences = re.split(r'(?<=[.!?])\s+', text)
         
-        # Use NLP if available
         if self._nlp_pipeline:
             return self._extract_projects_with_nlp(sentences)
         
-        # Fallback to keyword matching
-        return [s.strip() for s in sentences[:100]  # Limit processing
+        return [s.strip() for s in sentences[:100]
                 if sum(kw in s.lower() for kw in self.project_keywords) >= 2
-                and 20 < len(s) < 500][:5]  # Return top 5 most relevant
+                and 20 < len(s) < 500][:5]  
 
     def _extract_projects_with_nlp(self, sentences: List[str]) -> List[str]:
         """Use NLP to identify project-related sentences"""
         project_sentences = []
-        for sentence in sentences[:50]:  # Limit processing
+        for sentence in sentences[:50]:  
             try:
-                result = self._nlp_pipeline(sentence[:512])  # Model limit
+                result = self._nlp_pipeline(sentence[:512])
                 if result[0]["label"] == "LABEL_1" and result[0]["score"] > 0.7:
                     project_sentences.append(sentence)
             except Exception:
@@ -263,8 +247,7 @@ class SubcontractorExtractor:
             
         logger.info(f"[Extractor] Validating profile: {profile.get('business_name', 'Unknown')} / {profile.get('website', 'Unknown')}")
         
-        # Basic validation - only require business name and website
-        # This ensures more profiles pass through to further processing stages
+        
         valid = bool(profile.get("business_name")) and bool(profile.get("website"))
         
         if not valid:
@@ -274,22 +257,18 @@ class SubcontractorExtractor:
         
     def _extract_phone(self, soup: BeautifulSoup, text: str) -> Optional[str]:
         """Extract phone number with multiple strategies"""
-        # Check for semantic markup first
         for selector in ['a[href^="tel:"]', '[itemprop="telephone"]', '.phone', '.tel', '#phone']:
             element = soup.select_one(selector)
             if element:
-                # For tel: links
                 href = element.get('href', '')
                 if href.startswith('tel:'):
                     phone = href.replace('tel:', '').strip()
                     if phone:
                         return self._normalize_phone(phone)
-                # For text content
                 phone_text = element.get_text(strip=True)
                 if phone_text:
                     return self._normalize_phone(phone_text)
                     
-        # Fallback to regex pattern
         match = re.search(self.patterns["phone"], text)
         if match:
             return self._normalize_phone(match.group(0))
@@ -298,16 +277,13 @@ class SubcontractorExtractor:
         
     def _normalize_phone(self, phone: str) -> str:
         """Normalize phone number format"""
-        # Remove all non-digit characters
         digits = re.sub(r'\D', '', phone)
         
-        # Handle US formats (default assumption)
         if len(digits) == 10:
             return f"({digits[0:3]}) {digits[3:6]}-{digits[6:10]}"
         elif len(digits) == 11 and digits[0] == '1':
             return f"({digits[1:4]}) {digits[4:7]}-{digits[7:11]}"
         
-        # Return original if we can't normalize
         return phone
 
     def _create_minimal_profile(self, url: str) -> Dict:

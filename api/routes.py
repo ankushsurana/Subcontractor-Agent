@@ -84,7 +84,7 @@ def _poll_task_result(task_id, timeout, poll_interval):
 def submit_research_job(
     request: ResearchRequest,
     wait: Optional[bool] = Query(True, description="Wait for task completion"),
-    timeout: Optional[int] = Query(60, description="Max seconds to wait"),
+    timeout: Optional[int] = Query(120, description="Max seconds to wait"),
     poll_interval: Optional[float] = Query(1.0, description="Polling frequency in seconds")
 ):
     task = workers.tasks.celery_app.send_task("research_subcontractors", args=[request.dict()])
@@ -94,7 +94,7 @@ def submit_research_job(
         if poll_result["status"] == "SUCCEEDED":
             return JSONResponse(
                 status_code=200,
-                content={"status": "COMPLETED", "results": poll_result["results"]}
+                content={"status": "SUCCEEDED", "results": poll_result["results"]}
             )
         else:
             return JSONResponse(

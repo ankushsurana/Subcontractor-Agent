@@ -71,13 +71,11 @@ class ResearchOrchestrator:
                 logger.error(traceback.format_exc())
                 return []
 
-            # Phase 3: License Verification (FR3)
             try:
                 logger.info("[FR3] Starting license verification phase...")
                 verified_profiles = await self.verifier.verify_batch(raw_profiles)
                 logger.info(f"[FR3] License verification processed {len(verified_profiles)} profiles")
                 
-                # Log license verification results for the first few profiles
                 for i, profile in enumerate(verified_profiles[:3]):
                     logger.info(f"[FR3] Profile {i+1} - Business: {profile.get('business_name')}, "
                               f"License: {profile.get('lic_number', 'Unknown')}, "
@@ -89,17 +87,14 @@ class ResearchOrchestrator:
             except Exception as e:
                 logger.error(f"[FR3] Error in license verification phase: {str(e)}")
                 logger.error(traceback.format_exc())
-                # Continue with unverified profiles
                 logger.info("[FR3] Continuing with unverified profiles")
                 verified_profiles = raw_profiles
 
-            # Phase 4: Project History Parsing (FR4)
             try:
                 logger.info("[FR4] Starting project history parsing phase...")
                 enriched_profiles = await self.project_history.enrich_profiles(verified_profiles)
                 logger.info(f"[FR4] Project history parsing enriched {len(enriched_profiles)} profiles")
                 
-                # Log project counts for first few profiles
                 for i, profile in enumerate(enriched_profiles[:3]):
                     tx_projects = profile.get('tx_projects_past_5yrs', 0) or 0
                     logger.info(f"[FR4] Profile {i+1} - Business: {profile.get('business_name')}, "
@@ -111,17 +106,14 @@ class ResearchOrchestrator:
             except Exception as e:
                 logger.error(f"[FR4] Error in project history phase: {str(e)}")
                 logger.error(traceback.format_exc())
-                # Continue with verified profiles if history parsing fails
                 logger.info("[FR4] Continuing with verified profiles")
                 enriched_profiles = verified_profiles
 
-            # Phase 5: Result Formatting and Scoring (FR5)
             try:
                 logger.info("[FR5] Starting result formatting and scoring phase...")
                 results = self._format_results(enriched_profiles, request)
                 logger.info(f"[FR5] Formatted and scored {len(results)} final results")
                 
-                # Log final scores for top 3 results
                 sorted_results = sorted(results, key=lambda x: x.score, reverse=True)
                 for i, result in enumerate(sorted_results[:3]):
                     logger.info(f"[FR5] Result {i+1} - Name: {result.name}, Score: {result.score}, "
@@ -157,27 +149,21 @@ class ResearchOrchestrator:
         
         for profile in profiles:
             try:
-                # Add debug logging to see the raw profile
                 logger.debug(f"Raw profile data: {profile}")
                 
-                # Accept profiles with at least a website
                 if not profile.get("website"):
                     logger.debug(f"Skipping profile with no website: {profile}")
                     continue
                     
-                # Ensure all values have appropriate defaults and types
-                # Check for business_name first, fall back to name
+                
                 name = str(profile.get("business_name") or profile.get("name", "Unknown"))
                 website = str(profile.get("website") or profile.get("source_url", ""))
-                
-                # Extract location data (prefer profile data, fallback to request data)
+
                 location = profile.get("hq_address") or ""
                 city = str(profile.get("city") or request.get("city", ""))
                 state = str(profile.get("state") or request.get("state", ""))
                 
-                # If we have a full address but no city/state, try to extract them
                 if location and (not city or not state):
-                    # Simple extraction - assumes US address format with city, state at the end
                     parts = location.split(",")
                     if len(parts) >= 2:
                         if not city and len(parts) >= 2:
@@ -187,30 +173,24 @@ class ResearchOrchestrator:
                             if state_zip:
                                 state = state_zip[0].strip()
                 
-                # License data
                 lic_active = bool(profile.get("lic_active", False))
                 lic_number = str(profile.get("lic_number") or profile.get("license") or 
                                profile.get("licensing_text") or "Unknown")
                 
-                # Convert nullable numeric values
                 bond_amount = self._parse_bond_amount(profile, request.get("min_bond", 0))
                 
                 tx_projects = profile.get("tx_projects_past_5yrs", 0)
                 if not isinstance(tx_projects, int) or tx_projects is None:
                     tx_projects = 0
                 
-                # Score calculation using all available data
                 score = self._calculate_score(profile, request)
                 if score is None:
                     score = 0
                 
-                # Handle text values safely
                 evidence_url = str(profile.get("website") or profile.get("source_url", ""))
                 
-                # Combine all available text evidence
                 evidence_text = self._get_evidence_text(profile)
                 
-                # Ensure all values are proper types for Pydantic
                 result_data = {
                     "name": name or "Unknown",
                     "website": website or "",
@@ -226,7 +206,6 @@ class ResearchOrchestrator:
                     "last_checked": datetime.utcnow().isoformat()
                 }
                 
-                # Log the data before creating the model for debugging
                 logger.debug(f"Creating ResearchResult with data: {result_data}")
                 
                 result = ResearchResult(**result_data)
@@ -239,11 +218,9 @@ class ResearchOrchestrator:
 
     def _count_tx_projects(self, profile: Dict) -> int:
         """Count verified TX projects from last 5 years"""
-        # Use the analyzed count if available (F-4)
         if "tx_projects_past_5yrs" in profile:
             return int(profile["tx_projects_past_5yrs"])
             
-        # Fallback to simple count if no analysis was done
         projects = profile.get("projects", [])
         if isinstance(projects, list):
             return len(projects)
@@ -253,16 +230,14 @@ class ResearchOrchestrator:
         """Extract evidence text with project context"""
         evidence = []
         
-        # Include base evidence if available
         if profile.get("raw_text"):
             evidence.append(str(profile["raw_text"])[:300])
             
-        # Include project evidence snippets
         if "project_evidence" in profile:
-            for item in profile["project_evidence"][:2]:  # Max 2 project snippets
+            for item in profile["project_evidence"][:2]: 
                 evidence.append(item["text"][:200])
                 
-        return " [...] ".join(evidence)[:500]  # Concatenate with length limit
+        return " [...] ".join(evidence)[:500]
 
     def _calculate_score(self, profile: Dict, request: Dict) -> int:
         """
@@ -281,20 +256,17 @@ class ResearchOrchestrator:
             score = 0
             logger.debug(f"[Scoring] Calculating score for {profile.get('business_name', 'Unknown')}")
             
-            # Try to get state from request safely
+
             request_state = request.get("state", "")
             request_city = request.get("city", "")
-            
-            # 1. Geographic match (30 points max)
+
             location_score = 0
             profile_state = profile.get("state", "")
-            
-            # State match (20 points)
+
             if profile_state and request_state and profile_state.upper() == request_state.upper():
                 location_score += 20
                 logger.debug(f"[Scoring] State match +20 points")
                 
-                # City match (additional 10 points)
                 profile_city = profile.get("city", "")
                 if profile_city and request_city and profile_city.lower() == request_city.lower():
                     location_score += 10
@@ -302,25 +274,21 @@ class ResearchOrchestrator:
             
             score += location_score
             
-            # 2. License status (20 points)
             license_score = 0
             lic_active = profile.get("lic_active", False)
             if lic_active:
                 license_score = 20
                 logger.debug(f"[Scoring] Active license +20 points")
             elif profile.get("lic_number") and profile.get("lic_number") != "Unknown":
-                # Partial points for having a license even if not active
                 license_score = 10
                 logger.debug(f"[Scoring] Has license number but not active +10 points")
                 
             score += license_score
                 
-            # 3. Bonding capacity (30 points)
             bond_score = 0
-            bond_amount = profile.get("bond_amount", 0) or 0  # Convert None to 0
-            min_bond = request.get("min_bond", 0) or 0  # Convert None to 0
+            bond_amount = profile.get("bond_amount", 0) or 0 
+            min_bond = request.get("min_bond", 0) or 0  
             
-            # Make sure values are numbers
             if isinstance(bond_amount, str) and bond_amount.isdigit():
                 bond_amount = int(bond_amount)
             if isinstance(min_bond, str) and min_bond.isdigit():
@@ -334,13 +302,11 @@ class ResearchOrchestrator:
                     bond_score = 15
                     logger.debug(f"[Scoring] Bond at least 50% of requirement +15 points")
                 elif bond_amount > 0:
-                    # Some points just for having bond info
                     bond_score = 5
                     logger.debug(f"[Scoring] Has some bond amount +5 points")
                 
             score += bond_score
                 
-            # 4. Project history (20 points) - using verified TX projects
             project_score = 0
             tx_projects = self._count_tx_projects(profile)
             
@@ -348,12 +314,11 @@ class ResearchOrchestrator:
                 project_score = 20
                 logger.debug(f"[Scoring] 4+ TX projects +20 points")
             else:
-                project_score = min(20, tx_projects * 5)  # 5 points per project up to 20
+                project_score = min(20, tx_projects * 5)  
                 logger.debug(f"[Scoring] {tx_projects} TX projects +{project_score} points")
                 
             score += project_score
-            
-            # 5. Keyword matching (bonus points, up to 10)
+
             keyword_score = 0
             profile_name = profile.get("business_name", "") or profile.get("name", "") or ""
             evidence_text = profile.get("evidence_text", "") or ""
@@ -364,11 +329,9 @@ class ResearchOrchestrator:
                     keyword_score += 2
                     logger.debug(f"[Scoring] Keyword match '{keyword}' +2 points")
                     
-            # Cap keyword bonus at 10 points
             keyword_score = min(10, keyword_score)
             score += keyword_score
                     
-            # Cap total score at 100
             final_score = min(100, score)
             logger.debug(f"[Scoring] Final score: {final_score} (Location: {location_score}, License: {license_score}, "
                       f"Bond: {bond_score}, Projects: {project_score}, Keywords: {keyword_score})")
@@ -377,26 +340,24 @@ class ResearchOrchestrator:
             
         except Exception as e:
             logger.error(f"[Scoring] Error in _calculate_score: {str(e)}", exc_info=True)
-            return 0  # Default score on error
+            return 0 
 
     def _parse_bond_amount(self, profile: Dict, min_bond: int) -> int:
         """Parse bonding capacity with evidence validation"""
         try:
-            # Ensure min_bond is an integer, defaulting to 0
+  
             min_bond = int(min_bond) if min_bond is not None else 0
             
-            # Prefer explicitly parsed amounts
             if profile and "bond_amount" in profile:
                 bond_amount = profile["bond_amount"]
                 if isinstance(bond_amount, (int, float)) and bond_amount is not None:
                     return int(bond_amount)
             
-            # Fallback to minimum if bonding mentioned but no amount found
             evidence_text = profile.get("evidence_text", "") or ""
             if evidence_text and "bond" in evidence_text.lower():
                 return min_bond
             
-            return 0  # Default for no bonding info
+            return 0  
         except Exception as e:
             logger.error(f"Error in _parse_bond_amount: {str(e)} with profile: {profile}")
-            return 0  # Default on error
+            return 0

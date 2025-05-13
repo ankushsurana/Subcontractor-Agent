@@ -1,10 +1,3 @@
-# from motor.motor_asyncio import AsyncIOMotorClient
-# import os
-# from config import settings
-
-# client = AsyncIOMotorClient(os.getenv("MONGO_URL"))
-# db = client["agentdb"]
-
 
 from motor.motor_asyncio import AsyncIOMotorClient
 import os
