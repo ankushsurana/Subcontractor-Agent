@@ -13,6 +13,8 @@ services:
       - mongo
     command: >
       bash -c "uvicorn main:app --host 0.0.0.0 --port 8000 --reload"
+    volumes:
+      - ./dataset:/dataset
     restart: unless-stopped
 
   celery:
@@ -25,6 +27,8 @@ services:
       - mongo
     command: >
       celery -A workers.tasks worker --loglevel=info
+    volumes:
+      - ./dataset:/dataset
     restart: unless-stopped
 
   redis:
