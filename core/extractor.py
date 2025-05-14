@@ -9,14 +9,6 @@ from typing import List, Dict, Optional
 
 logger = logging.getLogger(__name__)
 
-try:
-    from transformers import pipeline
-    TRANSFORMERS_AVAILABLE = True
-except ImportError:
-    TRANSFORMERS_AVAILABLE = False
-
-logger = logging.getLogger(__name__)
-
 class SubcontractorExtractor:
     def __init__(self):
         self.patterns = {
@@ -37,38 +29,27 @@ class SubcontractorExtractor:
             "commercial", "hotel", "facility"
         ]
 
-        self._nlp_pipeline = None
-        self._initialize_nlp()
-
-    def _initialize_nlp(self):
-        """Initialize NLP components if available"""
-        if TRANSFORMERS_AVAILABLE and not self._nlp_pipeline:
-            try:
-                self._nlp_pipeline = pipeline(
-                    "text-classification",
-                    model="distilbert-base-uncased",
-                    tokenizer="distilbert-base-uncased"
-                )
-                logger.info("NLP pipeline initialized successfully")
-            except Exception as e:
-                logger.warning(f"Failed to initialize NLP pipeline: {str(e)}")
-                self._nlp_pipeline = None
 
     async def extract_profiles(self, urls: List[str]) -> List[Dict]:
         """Orchestrate parallel extraction with quality control"""
-        print(f"[Extractor] URLs to process: {urls}")
+        logger.info(f"[Extractor] URLs to process: {urls}")
+
+        valid_url = [url for url in urls if url]
+        
+
         async with httpx.AsyncClient(timeout=30) as client:
-            tasks = [self._process_url(client, url) for url in urls if url]
+
+            tasks = [self._process_url(client, url) for url in valid_url]
             results = await asyncio.gather(*tasks, return_exceptions=True)
-            print(f"[Extractor] Raw results: {results}")
+            # print(f"[Extractor] Raw results: {results}")
             filtered = [r for r in results if not isinstance(r, Exception) and self._validate_profile(r)]
-            print(f"[Extractor] Filtered/validated results: {filtered}")
+            # print(f"[Extractor] Filtered/validated results: {filtered}")
             return filtered
 
     async def _process_url(self, client: httpx.AsyncClient, url: str) -> Dict:
         """Process a single URL with focused extraction"""
         try:
-            logger.info(f"[Extractor] Processing URL: {url}")
+            
             response = await client.get(url, follow_redirects=True)
             if response.status_code != 200:
                 logger.warning(f"[Extractor] Failed to fetch {url} - status code: {response.status_code}")
@@ -157,7 +138,6 @@ class SubcontractorExtractor:
                     domain_name = parts[-2] 
             return domain_name.title()
         except Exception as e:
-            logger.error(f"Error extracting business name from URL {url}: {str(e)}")
             return "Unknown Business"
 
     def _extract_address(self, text: str) -> Optional[str]:
@@ -209,24 +189,9 @@ class SubcontractorExtractor:
         """Extract project snippets with keyword density analysis"""
         sentences = re.split(r'(?<=[.!?])\s+', text)
         
-        if self._nlp_pipeline:
-            return self._extract_projects_with_nlp(sentences)
-        
         return [s.strip() for s in sentences[:100]
                 if sum(kw in s.lower() for kw in self.project_keywords) >= 2
                 and 20 < len(s) < 500][:5]  
-
-    def _extract_projects_with_nlp(self, sentences: List[str]) -> List[str]:
-        """Use NLP to identify project-related sentences"""
-        project_sentences = []
-        for sentence in sentences[:50]:  
-            try:
-                result = self._nlp_pipeline(sentence[:512])
-                if result[0]["label"] == "LABEL_1" and result[0]["score"] > 0.7:
-                    project_sentences.append(sentence)
-            except Exception:
-                continue
-        return project_sentences[:5] 
 
     def _extract_evidence(self, soup: BeautifulSoup, text: str) -> str:
         """Extract relevant evidence text chunks"""
@@ -245,9 +210,6 @@ class SubcontractorExtractor:
             logger.warning("Empty profile received for validation")
             return False
             
-        logger.info(f"[Extractor] Validating profile: {profile.get('business_name', 'Unknown')} / {profile.get('website', 'Unknown')}")
-        
-        
         valid = bool(profile.get("business_name")) and bool(profile.get("website"))
         
         if not valid:

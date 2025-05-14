@@ -2,7 +2,6 @@ import asyncio
 import os
 from datetime import datetime
 from typing import List
-
 from celery import Celery
 from dotenv import load_dotenv
 from duckduckgo_search import DDGS

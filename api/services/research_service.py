@@ -41,7 +41,6 @@ class ResearchOrchestrator:
                     logger.warning("[FR1] No candidates found during discovery phase")
                     return []
             except Exception as e:
-                logger.error(f"[FR1] Error in discovery phase: {str(e)}")
                 logger.error(traceback.format_exc())
                 return []
             
@@ -49,14 +48,11 @@ class ResearchOrchestrator:
             try:
                 logger.info("[FR2] Starting profile extraction phase...")
                 urls = [c.get("url", "") for c in candidates if c.get("url")]
-                logger.info(f"[FR2] Extracting profiles from {len(urls)} URLs")
-                
+                            
                 if not urls:
-                    logger.warning("[FR2] No valid URLs found in candidates")
                     return []
                     
                 raw_profiles = await self.extractor.extract_profiles(urls)
-                logger.info(f"[FR2] Profile extraction found {len(raw_profiles)} profiles")
                 
                 # Log sample profile data
                 if raw_profiles:
@@ -71,10 +67,10 @@ class ResearchOrchestrator:
                 logger.error(traceback.format_exc())
                 return []
 
+            # Phase 3: License Verification (FR3)
             try:
                 logger.info("[FR3] Starting license verification phase...")
                 verified_profiles = await self.verifier.verify_batch(raw_profiles)
-                logger.info(f"[FR3] License verification processed {len(verified_profiles)} profiles")
                 
                 for i, profile in enumerate(verified_profiles[:3]):
                     logger.info(f"[FR3] Profile {i+1} - Business: {profile.get('business_name')}, "
@@ -82,7 +78,6 @@ class ResearchOrchestrator:
                               f"Active: {profile.get('lic_active', False)}")
                 
                 if not verified_profiles:
-                    logger.warning("[FR3] No profiles after verification, using raw profiles")
                     verified_profiles = raw_profiles
             except Exception as e:
                 logger.error(f"[FR3] Error in license verification phase: {str(e)}")
@@ -90,10 +85,10 @@ class ResearchOrchestrator:
                 logger.info("[FR3] Continuing with unverified profiles")
                 verified_profiles = raw_profiles
 
+            # Phase 4: Project History Parsing (FR4)
             try:
                 logger.info("[FR4] Starting project history parsing phase...")
                 enriched_profiles = await self.project_history.enrich_profiles(verified_profiles)
-                logger.info(f"[FR4] Project history parsing enriched {len(enriched_profiles)} profiles")
                 
                 for i, profile in enumerate(enriched_profiles[:3]):
                     tx_projects = profile.get('tx_projects_past_5yrs', 0) or 0
@@ -112,7 +107,6 @@ class ResearchOrchestrator:
             try:
                 logger.info("[FR5] Starting result formatting and scoring phase...")
                 results = self._format_results(enriched_profiles, request)
-                logger.info(f"[FR5] Formatted and scored {len(results)} final results")
                 
                 sorted_results = sorted(results, key=lambda x: x.score, reverse=True)
                 for i, result in enumerate(sorted_results[:3]):
@@ -120,7 +114,6 @@ class ResearchOrchestrator:
                               f"License: {result.lic_number}, Active: {result.lic_active}")
                 
                 if not results:
-                    logger.warning("[FR5] No results after formatting")
                     return []
             except Exception as e:
                 logger.error(f"[FR5] Error in result formatting: {str(e)}")
@@ -142,11 +135,8 @@ class ResearchOrchestrator:
         """
         results = []
         if not profiles:
-            logger.warning("No profiles to format")
             return results
-        
-        logger.info(f"Formatting {len(profiles)} profiles into research results")
-        
+                
         for profile in profiles:
             try:
                 logger.debug(f"Raw profile data: {profile}")
@@ -205,9 +195,7 @@ class ResearchOrchestrator:
                     "evidence_text": evidence_text or "",
                     "last_checked": datetime.utcnow().isoformat()
                 }
-                
-                logger.debug(f"Creating ResearchResult with data: {result_data}")
-                
+                                
                 result = ResearchResult(**result_data)
                 results.append(result)
             except Exception as e:
@@ -254,9 +242,6 @@ class ResearchOrchestrator:
         """
         try:
             score = 0
-            logger.debug(f"[Scoring] Calculating score for {profile.get('business_name', 'Unknown')}")
-            
-
             request_state = request.get("state", "")
             request_city = request.get("city", "")
 
@@ -265,12 +250,10 @@ class ResearchOrchestrator:
 
             if profile_state and request_state and profile_state.upper() == request_state.upper():
                 location_score += 20
-                logger.debug(f"[Scoring] State match +20 points")
                 
                 profile_city = profile.get("city", "")
                 if profile_city and request_city and profile_city.lower() == request_city.lower():
                     location_score += 10
-                    logger.debug(f"[Scoring] City match +10 points")
             
             score += location_score
             
@@ -278,10 +261,8 @@ class ResearchOrchestrator:
             lic_active = profile.get("lic_active", False)
             if lic_active:
                 license_score = 20
-                logger.debug(f"[Scoring] Active license +20 points")
             elif profile.get("lic_number") and profile.get("lic_number") != "Unknown":
                 license_score = 10
-                logger.debug(f"[Scoring] Has license number but not active +10 points")
                 
             score += license_score
                 
@@ -297,13 +278,10 @@ class ResearchOrchestrator:
             if bond_amount and min_bond:
                 if bond_amount >= min_bond:
                     bond_score = 30
-                    logger.debug(f"[Scoring] Bond meets/exceeds requirement +30 points")
                 elif bond_amount >= (min_bond * 0.5):
                     bond_score = 15
-                    logger.debug(f"[Scoring] Bond at least 50% of requirement +15 points")
                 elif bond_amount > 0:
                     bond_score = 5
-                    logger.debug(f"[Scoring] Has some bond amount +5 points")
                 
             score += bond_score
                 
@@ -312,10 +290,8 @@ class ResearchOrchestrator:
             
             if tx_projects >= 4:
                 project_score = 20
-                logger.debug(f"[Scoring] 4+ TX projects +20 points")
             else:
                 project_score = min(20, tx_projects * 5)  
-                logger.debug(f"[Scoring] {tx_projects} TX projects +{project_score} points")
                 
             score += project_score
 
@@ -327,7 +303,6 @@ class ResearchOrchestrator:
             for keyword in request.get("keywords", []):
                 if keyword and keyword.lower() in text:
                     keyword_score += 2
-                    logger.debug(f"[Scoring] Keyword match '{keyword}' +2 points")
                     
             keyword_score = min(10, keyword_score)
             score += keyword_score
@@ -359,5 +334,4 @@ class ResearchOrchestrator:
             
             return 0  
         except Exception as e:
-            logger.error(f"Error in _parse_bond_amount: {str(e)} with profile: {profile}")
             return 0

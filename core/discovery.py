@@ -83,7 +83,7 @@ class DiscoveryService:
         return " ".join(components)
 
     async def _retry_search(self, search_func, query: str) -> List[Dict]:
-        """Retry failed searches with exponential backoff"""
+        """Retry failed searches with exponntial backoff"""
         for attempt in range(self.max_retries):
             try:
                 return await search_func(query)
@@ -91,12 +91,10 @@ class DiscoveryService:
                 if attempt == self.max_retries - 1:
                     raise
                 wait_time = 2 ** attempt
-                logger.warning(f"Retry {attempt + 1} for {search_func.__name__} after {wait_time}s")
                 await asyncio.sleep(wait_time)
         return []
 
     def _normalize_url(self, url: str) -> str:
-        """Standardize URLs to root domains"""
         if not url:
             return ""
         try:
@@ -111,7 +109,6 @@ class DiscoveryService:
             return ""
 
     def _is_valid_contractor_url(self, url: str, seen_domains: set) -> bool:
-        """Updated validation for contractor URLs"""
         if not url.startswith(("http://", "https://")):
             return False
             

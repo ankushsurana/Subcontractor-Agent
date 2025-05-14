@@ -50,7 +50,6 @@ class ProjectHistoryParser:
                 logger.info(f"Project history parser processed {len(result)} profiles")
                 
                 fr_compliant_profiles = [p for p in result if p.get("tx_projects_past_5yrs", 0) > 0]
-                logger.info(f"Found {len(fr_compliant_profiles)} candidates with recent Texas projects")
                 
                 return fr_compliant_profiles
         except Exception as e:
@@ -72,13 +71,10 @@ class ProjectHistoryParser:
             
         url = profile.get("website") or profile.get("source_url")
         if not url:
-            logger.warning("[Projects] Profile has no website URL for project extraction")
             profile["tx_projects_past_5yrs"] = 0
             return profile
             
-        try:
-            logger.info(f"[Projects] Processing project history for URL: {url}")
-            
+        try:            
             tx_recent_count = 0
             tx_older_count = 0
             project_evidence = []
@@ -129,7 +125,6 @@ class ProjectHistoryParser:
                         project_links.append(abs_link)
                 
                 project_links = list(set(project_links))[:15] 
-                logger.info(f"[Projects] Found {len(project_links)} potential project links")
                 
                 for link in project_links:
                     try:
@@ -208,10 +203,8 @@ class ProjectHistoryParser:
             profile["tx_older_projects"] = tx_older_count
             profile["project_evidence"] = project_evidence
             
-            logger.info(f"[Projects] Final counts - Recent TX projects: {profile['tx_projects_past_5yrs']}, Older TX projects: {tx_older_count}")
             
             return profile
         except Exception as e:
-            logger.error(f"[Projects] Error in project history enrichment: {str(e)}")
             profile["tx_projects_past_5yrs"] = 0
             return profile

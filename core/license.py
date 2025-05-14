@@ -4,6 +4,7 @@ from typing import List, Dict, Optional
 import pandas as pd
 from rapidfuzz import fuzz, process
 import re
+import os
 from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
@@ -11,16 +12,47 @@ logger = logging.getLogger(__name__)
 class LicenseVerifier:
     """Handle TX license verification with TDLR CSV data"""
 
-    def __init__(self, csv_path: str = "dataset/TDLR_All_Licenses.csv"):
-        self.csv_path = csv_path
+    def __init__(self, csv_path: str = None):
+        
+        if csv_path is None:
+            csv_path = os.environ.get('TDLR_CSV_PATH', 'D:\Subcontractor Research Agent\dataset\TDLR_All_Licenses.csv')
+
+        self.csv_path = os.path.normpath(csv_path)
         self.license_data = None
         self._load_license_data()
 
     def _load_license_data(self):
-        """Load and preprocess license data from CSV"""
+
+        if not os.path.exists(self.csv_path):
+            logger.warning(f"CSV file not found at {self.csv_path}, trying alternate paths")
+            
+            alternate_paths = [
+                os.path.normpath('dataset/TDLR_All_Licenses.csv'),  
+                os.path.normpath('./dataset/TDLR_All_Licenses.csv'),
+                os.path.normpath('../dataset/TDLR_All_Licenses.csv'),  
+                os.path.normpath('/app/dataset/TDLR_All_Licenses.csv'),
+            ]
+            
+            if '\\' in self.csv_path:
+                alternate_paths.append(self.csv_path.replace('\\', '/'))
+            if '/' in self.csv_path:
+                alternate_paths.append(self.csv_path.replace('/', '\\'))
+                
+            for path in alternate_paths:
+                if os.path.exists(path):
+                    self.csv_path = path
+                    break
+            else:
+                try:
+                    if os.path.exists('dataset'):
+                        logger.error(f"Dataset directory contents: {os.listdir('dataset')}")
+                except Exception as e:
+                    logger.error(f"Failed to list directory contents: {e}")
+                
+                raise FileNotFoundError(f"License CSV file not found at {self.csv_path} or any alternate paths")
+       
         try:
-            sample_data = pd.read_csv(self.csv_path, nrows=5)
-            logger.info(f"CSV columns found: {list(sample_data.columns)}")
+            sample_data = pd.read_csv(self.csv_path)
             
             self.license_data = pd.read_csv(
                 self.csv_path,
@@ -57,7 +89,6 @@ class LicenseVerifier:
             
             logger.info(f"Successfully loaded {len(self.license_data)} license records with columns: {list(self.license_data.columns)}")
         except Exception as e:
-            logger.error(f"Failed to load license data: {str(e)}")
             raise RuntimeError("License verification unavailable - data loading failed")
 
     def _find_column(self, possible_names):
@@ -109,7 +140,6 @@ class LicenseVerifier:
         """Enhanced verification with improved matching and date parsing"""
         try:
             if self.license_data is None or self.license_data.empty:
-                logger.error("[License] License data not loaded, skipping verification")
                 return {**profile, "lic_active": False, "lic_number": "Unknown", "lic_match_score": 0}
                 
             business_name = str(profile.get("business_name", "")).strip().upper()
@@ -125,7 +155,6 @@ class LicenseVerifier:
                 ).upper()
 
             if not business_name:
-                logger.warning("[License] No business name available for verification")
                 return {**profile, "lic_active": False, "lic_number": "Unknown", "lic_match_score": 0}
 
             license_text = profile.get("licensing_text", "")
@@ -136,7 +165,6 @@ class LicenseVerifier:
                                          license_text, re.IGNORECASE)
                 if license_match:
                     extracted_license = license_match.group(1).strip()
-                    logger.info(f"[License] Extracted license number from text: {extracted_license}")
             
             if extracted_license and 'LICENSE_NUMBER' in self.license_data.columns:
                 license_matches = self.license_data[
