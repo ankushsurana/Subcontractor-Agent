@@ -10,11 +10,6 @@ from bs4 import BeautifulSoup
 logger = logging.getLogger(__name__)
 
 class DiscoveryService:
-    """
-    Free Google-search compatible discovery service using:
-    - Startpage (Google results proxy)
-    - Brave Search
-    """
     def __init__(self):
         self.min_candidates = 20
         self.user_agents = [
@@ -32,7 +27,6 @@ class DiscoveryService:
         self.max_retries = 2
 
     async def find_subcontractors(self, trade: str, city: str, state: str, keywords: List[str]) -> List[Dict]:
-        """Main discovery method with enhanced Google-style search"""
         query = self._build_google_style_query(trade, city, state, keywords)
         if not query:
             logger.error("Invalid search query")
@@ -65,7 +59,6 @@ class DiscoveryService:
         return candidates[:self.min_candidates]
 
     def _build_google_style_query(self, trade: str, city: str, state: str, keywords: List[str]) -> str:
-        """Builds Google-style search queries with precision operators"""
         components = []
         
         if trade:
@@ -83,7 +76,6 @@ class DiscoveryService:
         return " ".join(components)
 
     async def _retry_search(self, search_func, query: str) -> List[Dict]:
-        """Retry failed searches with exponntial backoff"""
         for attempt in range(self.max_retries):
             try:
                 return await search_func(query)
@@ -115,7 +107,6 @@ class DiscoveryService:
         parsed = urlparse(url)
         domain = parsed.netloc.lower()
         
-        # Allow subdomains and newer TLDs
         domain_pattern = r"^([a-z0-9-]+\.)*[a-z0-9-]+\.[a-z]{2,}(\.[a-z]{2,})?$"
         
         return (
@@ -126,7 +117,6 @@ class DiscoveryService:
         ) 
             
     async def _search_brave(self, query: str) -> List[Dict]:
-        """Search Brave with improved selectors for 2025 structure"""
         try:
             headers = {
                 "User-Agent": random.choice(self.user_agents),
@@ -143,17 +133,13 @@ class DiscoveryService:
                     soup = BeautifulSoup(response.text, 'html.parser')
                     results = []
                     
-                    # Target main organic results
                     for result in soup.select('[data-type="web"]'):
-                        # Extract URL
                         link = result.select_one('a[href]')
                         if not link:
                             continue
                         
-                        # Extract title
                         title = link.get_text(strip=True)
                         
-                        # Extract description
                         description = ""
                         desc_elem = result.select_one('.snippet-content, .snippet-description')
                         if desc_elem:
@@ -165,7 +151,7 @@ class DiscoveryService:
                             "description": description
                         })
                     
-                    return results[:20]  # Return first 20 results
+                    return results[:20]
                     
         except Exception as e:
             logger.error(f"Brave search failed: {str(e)}")

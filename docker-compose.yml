@@ -12,10 +12,12 @@ services:
       - redis
       - mongo
     command: >
-      bash -c "uvicorn main:app --host 0.0.0.0 --port 8000 --reload"
+      bash -c "uvicorn main:app --host 0.0.0.0 --port 8000"
     volumes:
-      - ./dataset:/dataset
+      - ./dataset:/app/dataset
     restart: unless-stopped
+    networks:
+      - subcontractor-net # <-- add this line
 
   celery:
     build: .
@@ -28,23 +30,20 @@ services:
     command: >
       celery -A workers.tasks worker --loglevel=info
     volumes:
-      - ./dataset:/dataset
+      - ./dataset:/app/dataset
     restart: unless-stopped
+    networks:
+      - subcontractor-net
 
   redis:
-    image: redis:7
+    image: redis:7-alpine
     container_name: subcontractor_redis
     ports:
       - "6379:6379"
     volumes:
-      - redis_data:/data
-    command: redis-server --appendonly yes
-    healthcheck:
-      test: [ "CMD", "redis-cli", "ping" ]
-      interval: 5s
-      timeout: 3s
-      retries: 5
-    restart: unless-stopped
+      - redis-data:/data
+    networks:
+      - subcontractor-net # <-- add this line
 
   mongo:
     image: mongo:6
@@ -52,11 +51,15 @@ services:
     ports:
       - "27017:27017"
     volumes:
-      - mongo_data:/data/db
-    environment:
-      MONGO_INITDB_ROOT_USERNAME: admin
-      MONGO_INITDB_ROOT_PASSWORD: password
-    restart: unless-stopped
+      - mongo-data:/data/db
+    networks:
+      - subcontractor-net # <-- add this line
+
 volumes:
-  redis_data:
-  mongo_data:
+  redis-data:
+  mongo-data:
+
+
+networks:
+  subcontractor-net:
+    driver: bridge

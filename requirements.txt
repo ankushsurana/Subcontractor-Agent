@@ -17,3 +17,4 @@ tf-keras
 pandas
 rapidfuzz
 tensorflow-cpu
+cachetools
